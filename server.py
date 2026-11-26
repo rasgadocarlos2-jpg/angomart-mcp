@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
+"""AngoMart MCP: consulta de lojas, catálogo, preços e listas de compras.
+
+Servidor não-oficial, apenas de leitura. Não cria carrinhos nem encomendas.
 """
-AngoMart MCP Server
-Consulta lojas, categorias e produtos do AngoMart (Angola) via API JSON.
-Não-oficial. Sem afiliação com AngoMart ou Yelo/Jungleworks.
-"""
+from __future__ import annotations
+
+import asyncio
+import json
 import os
-from typing import Optional
+import time
+import unicodedata
+from typing import Any, Optional
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -15,95 +20,220 @@ try:
 except ImportError:
     HAS_PLAYWRIGHT = False
 
-    async def browser_fetch_json(*_a, **_kw):
-        raise RuntimeError("playwright fallback not available")
+    async def browser_fetch_json(*_args: Any, **_kwargs: Any) -> dict:
+        raise RuntimeError("Fallback Playwright indisponível")
 
 mcp = FastMCP("angomart")
 
 BASE_URL = "https://www.angomart.com"
-MARKETPLACE_USER_ID = 1729112
 DOMAIN = "www.angomart.com"
-
+MARKETPLACE_USER_ID = 1729112
 DEFAULT_LAT = -8.914876
 DEFAULT_LNG = 13.203437
+CACHE_TTL = int(os.getenv("ANGOMART_CACHE_TTL", "180"))
+MAX_PAGES = int(os.getenv("ANGOMART_MAX_PAGES", "5"))
+TIMEOUT = float(os.getenv("ANGOMART_TIMEOUT", "25"))
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
-    ),
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8",
     "Origin": BASE_URL,
     "Referer": f"{BASE_URL}/",
     "X-Requested-With": "XMLHttpRequest",
 }
-
-_COOKIE_OVERRIDE = os.environ.get("ANGOMART_COOKIE", "").strip()
-if _COOKIE_OVERRIDE:
-    HEADERS["Cookie"] = _COOKIE_OVERRIDE
+_cookie = os.getenv("ANGOMART_COOKIE", "").strip()
+if _cookie:
+    HEADERS["Cookie"] = _cookie
 
 _client: Optional[httpx.AsyncClient] = None
+_client_lock = asyncio.Lock()
 _marketplace_ref: Optional[str] = None
+_cache: dict[str, tuple[float, Any]] = {}
+
+
+def _cached(key: str) -> Any | None:
+    entry = _cache.get(key)
+    if entry and entry[0] > time.monotonic():
+        return entry[1]
+    if entry:
+        _cache.pop(key, None)
+    return None
+
+
+def _remember(key: str, value: Any) -> Any:
+    _cache[key] = (time.monotonic() + CACHE_TTL, value)
+    return value
 
 
 async def _get_client() -> httpx.AsyncClient:
     global _client, _marketplace_ref
-    if _client is None:
-        _client = httpx.AsyncClient(timeout=25.0, headers=HEADERS, follow_redirects=True)
-        # Warmup: obter marketplace_reference_id (Yelo exige-o em todas as chamadas)
-        r = await _client.get(
-            f"{BASE_URL}/api/marketplace_fetch_app_configuration",
-            params={
-                "domain_name": DOMAIN,
-                "post_to_get": 1,
-                "dual_user_key": 0,
-                "language": "pt",
-            },
-        )
+    if _client is not None:
+        return _client
+    async with _client_lock:
+        if _client is not None:
+            return _client
+        _client = httpx.AsyncClient(timeout=TIMEOUT, headers=HEADERS, follow_redirects=True)
         try:
-            j = r.json()
-            data = j.get("data") or {}
-            _marketplace_ref = (
-                data.get("marketplace_reference_id")
-                or data.get("marketplace", {}).get("marketplace_reference_id")
+            response = await _client.get(
+                f"{BASE_URL}/api/marketplace_fetch_app_configuration",
+                params={"domain_name": DOMAIN, "post_to_get": 1, "dual_user_key": 0, "language": "pt"},
             )
-        except Exception:
+            response.raise_for_status()
+            payload = response.json().get("data") or {}
+            _marketplace_ref = (
+                payload.get("marketplace_reference_id")
+                or (payload.get("marketplace") or {}).get("marketplace_reference_id")
+            )
+        except (httpx.HTTPError, ValueError, TypeError):
+            # Algumas versões da API funcionam sem marketplace_reference_id.
             _marketplace_ref = None
-    return _client
+        return _client
 
 
-async def _get(path: str, params: dict) -> dict:
+async def _request(method: str, path: str, payload: dict[str, Any], store_id: int | None = None) -> dict:
     client = await _get_client()
-    params = {**params}
-    if _marketplace_ref and "marketplace_reference_id" not in params:
-        params["marketplace_reference_id"] = _marketplace_ref
-    r = await client.get(f"{BASE_URL}{path}", params=params)
-    r.raise_for_status()
-    return r.json()
-
-
-async def _post(path: str, body: dict, seed_store_id: Optional[int] = None) -> dict:
-    client = await _get_client()
-    body = {**body}
-    if _marketplace_ref and "marketplace_reference_id" not in body:
-        body["marketplace_reference_id"] = _marketplace_ref
-    r = await client.post(f"{BASE_URL}{path}", json=body)
-    r.raise_for_status()
-    j = r.json()
-    # Anti-bot block: fall back to a real browser if available
-    if j.get("status") == 100 and HAS_PLAYWRIGHT:
-        store_id = seed_store_id or body.get("user_id")
-        seed = f"{BASE_URL}/en/store/Talatona/{store_id}" if store_id else f"{BASE_URL}/"
-        return await browser_fetch_json(seed, path, "POST", body)
-    return j
-
-
-def _fmt_price(kz) -> str:
+    data = dict(payload)
+    if _marketplace_ref and "marketplace_reference_id" not in data:
+        data["marketplace_reference_id"] = _marketplace_ref
     try:
-        return f"{int(float(kz)):,} Kz".replace(",", ".")
-    except Exception:
-        return f"{kz} Kz"
+        if method.upper() == "GET":
+            response = await client.get(f"{BASE_URL}{path}", params=data)
+        else:
+            response = await client.post(f"{BASE_URL}{path}", json=data)
+        response.raise_for_status()
+        result = response.json()
+    except httpx.TimeoutException as exc:
+        raise RuntimeError("Tempo limite ao contactar o AngoMart. Tenta novamente.") from exc
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(f"AngoMart respondeu com HTTP {exc.response.status_code}.") from exc
+    except (httpx.HTTPError, ValueError) as exc:
+        raise RuntimeError(f"Não foi possível obter uma resposta válida do AngoMart: {exc}") from exc
+
+    if result.get("status") == 100:
+        if HAS_PLAYWRIGHT and method.upper() == "POST":
+            seed = f"{BASE_URL}/en/store/Talatona/{store_id}" if store_id else f"{BASE_URL}/"
+            result = await browser_fetch_json(seed, path, method, data)
+        else:
+            raise RuntimeError(
+                "O AngoMart bloqueou o pedido directo (status 100). "
+                "Instala Playwright/Chromium ou configura ANGOMART_COOKIE."
+            )
+    return result
+
+
+def _data_items(response: dict, *keys: str) -> list[dict]:
+    data = response.get("data")
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return []
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, list):
+            return value
+    return []
+
+
+def _format_price(value: Any) -> str:
+    try:
+        number = float(value)
+        return f"{number:,.0f} Kz".replace(",", ".")
+    except (TypeError, ValueError):
+        return f"{value if value is not None else 'Preço indisponível'} Kz"
+
+
+def _normalise(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", value.casefold())
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).strip()
+
+
+def _flatten_categories(categories: list[dict]) -> list[dict]:
+    flattened: list[dict] = []
+    stack = list(reversed(categories))
+    seen: set[int] = set()
+    while stack:
+        category = stack.pop()
+        cid = category.get("catalogue_id")
+        if cid is not None:
+            try:
+                numeric_id = int(cid)
+            except (TypeError, ValueError):
+                numeric_id = None
+            if numeric_id is not None and numeric_id not in seen:
+                seen.add(numeric_id)
+                flattened.append(category)
+        children = category.get("sub_categories") or category.get("children") or []
+        if isinstance(children, list):
+            stack.extend(reversed(children))
+    return flattened
+
+
+async def _get_categories(store_id: int) -> list[dict]:
+    key = f"categories:{store_id}"
+    cached = _cached(key)
+    if cached is not None:
+        return cached
+    response = await _request("POST", "/api/catalogue/get", {
+        "domain_name": DOMAIN, "marketplace_user_id": MARKETPLACE_USER_ID,
+        "user_id": store_id, "post_to_get": 1, "source": 0,
+        "dual_user_key": 0, "language": "pt",
+    }, store_id)
+    data = response.get("data") or {}
+    categories = (data.get("result") or data.get("catalogue") or data.get("categories") or []) if isinstance(data, dict) else []
+    if not categories:
+        raise RuntimeError(f"Não foi possível obter categorias (status={response.get('status')}, mensagem={response.get('message')}).")
+    return _remember(key, categories)
+
+
+async def _get_products_page(store_id: int, catalogue_id: int, page: int) -> list[dict]:
+    key = f"products:{store_id}:{catalogue_id}:{page}"
+    cached = _cached(key)
+    if cached is not None:
+        return cached
+    response = await _request("POST", "/api/get_products_for_category", {
+        "domain_name": DOMAIN, "marketplace_user_id": MARKETPLACE_USER_ID,
+        "user_id": store_id, "catalogue_id": catalogue_id, "page_no": page,
+        "post_to_get": 1, "source": 0, "dual_user_key": 0, "language": "pt",
+    }, store_id)
+    products = _data_items(response, "products", "result")
+    if not products and response.get("status") not in (0, "0", 1, "1", None):
+        raise RuntimeError(f"Erro ao consultar produtos (status={response.get('status')}, mensagem={response.get('message')}).")
+    return _remember(key, products)
+
+
+async def _search(store_id: int, query: str, limit: int = 20) -> list[dict]:
+    q = _normalise(query)
+    if len(q) < 2:
+        raise ValueError("A pesquisa precisa de pelo menos 2 caracteres.")
+    categories = _flatten_categories(await _get_categories(store_id))
+    matches: list[dict] = []
+    for category in categories:
+        cid = int(category["catalogue_id"])
+        for page in range(1, MAX_PAGES + 1):
+            products = await _get_products_page(store_id, cid, page)
+            if not products:
+                break
+            for product in products:
+                if q in _normalise(str(product.get("name") or "")):
+                    product_copy = dict(product)
+                    product_copy.setdefault("_catalogue_id", cid)
+                    matches.append(product_copy)
+                    if len(matches) >= limit:
+                        return matches
+            # Sem metadados de paginação, uma página curta indica fim.
+            if len(products) < 20:
+                break
+    return matches
+
+
+def _format_product(product: dict) -> str:
+    return (
+        f"- {product.get('name', 'Produto sem nome')} — {_format_price(product.get('price'))}"
+        f" | stock: {product.get('available_quantity', 'n/d')}"
+        f" | SKU: {product.get('sku') or 'n/d'}"
+        f" | product_id: {product.get('product_id') or 'n/d'}"
+    )
 
 
 @mcp.tool()
@@ -112,66 +242,35 @@ async def angomart_list_stores(
     longitude: float = DEFAULT_LNG,
     limit: int = 20,
 ) -> str:
-    """Lista lojas AngoMart ordenadas por proximidade das coordenadas (Luanda/Talatona por omissão)."""
-    data = await _get(
-        "/api/marketplace/marketplace_get_city_storefronts_v3",
-        {
-            "domain_name": DOMAIN,
-            "post_to_get": 1,
-            "marketplace_user_id": MARKETPLACE_USER_ID,
-            "latitude": latitude,
-            "longitude": longitude,
-            "search_text": "",
-            "need_eta": 0,
-            "limit": limit,
-            "source": 0,
-            "dual_user_key": 0,
-            "language": "pt",
-        },
-    )
-    payload = data.get("data")
-    stores = payload if isinstance(payload, list) else (payload or {}).get("storefronts", []) or []
+    """Lista lojas AngoMart próximas das coordenadas indicadas (Luanda/Talatona por omissão)."""
+    if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+        raise ValueError("Coordenadas inválidas.")
+    limit = max(1, min(limit, 50))
+    response = await _request("GET", "/api/marketplace/marketplace_get_city_storefronts_v3", {
+        "domain_name": DOMAIN, "post_to_get": 1, "marketplace_user_id": MARKETPLACE_USER_ID,
+        "latitude": latitude, "longitude": longitude, "search_text": "", "need_eta": 0,
+        "limit": limit, "source": 0, "dual_user_key": 0, "language": "pt",
+    })
+    stores = _data_items(response, "storefronts", "result")
     if not stores:
-        return "Nenhuma loja encontrada para essa localização."
-
-    out = ["Lojas AngoMart encontradas:\n"]
-    for s in stores:
-        name = s.get("name") or s.get("store_name") or s.get("storepage_slug")
-        uid = s.get("user_id")
-        slug = s.get("storepage_slug", "")
-        out.append(f"- {name} (store_id: {uid})")
-        if slug:
-            out.append(f"  URL: {BASE_URL}/en/store/{slug}/{uid}")
-    return "\n".join(out)
+        return "Nenhuma loja encontrada para estas coordenadas."
+    lines = ["Lojas AngoMart:"]
+    for store in stores[:limit]:
+        name = store.get("name") or store.get("store_name") or store.get("storepage_slug") or "Loja"
+        sid = store.get("user_id")
+        slug = store.get("storepage_slug")
+        lines.append(f"- {name} (store_id: {sid})" + (f" — {BASE_URL}/en/store/{slug}/{sid}" if slug else ""))
+    return "\n".join(lines)
 
 
 @mcp.tool()
 async def angomart_list_categories(store_id: int) -> str:
-    """Árvore de categorias de uma loja. Usa `angomart_list_stores` para obter store_id."""
-    data = await _post(
-        "/api/catalogue/get",
-        {
-            "domain_name": DOMAIN,
-            "marketplace_user_id": MARKETPLACE_USER_ID,
-            "user_id": store_id,
-            "post_to_get": 1,
-            "source": 0,
-            "dual_user_key": 0,
-            "language": "pt",
-        },
-        seed_store_id=store_id,
+    """Lista categorias e subcategorias de uma loja AngoMart."""
+    categories = _flatten_categories(await _get_categories(store_id))
+    return "\n".join(
+        [f"Categorias da loja {store_id} (catalogue_id):"] +
+        [f"- {c.get('name', 'Categoria')} ({c.get('catalogue_id')})" for c in categories]
     )
-    payload = data.get("data") or {}
-    cats = payload.get("result") or payload.get("catalogue") or payload.get("categories") or []
-    if not cats:
-        return f"Nenhuma categoria encontrada (status: {data.get('status')}, msg: {data.get('message')})."
-
-    out = ["Categorias disponíveis (catalogue_id entre parênteses):\n"]
-    for c in cats:
-        out.append(f"- {c.get('name')} ({c.get('catalogue_id')})")
-        for sub in c.get("sub_categories", []) or []:
-            out.append(f"    - {sub.get('name')} ({sub.get('catalogue_id')})")
-    return "\n".join(out)
 
 
 @mcp.tool()
@@ -179,38 +278,25 @@ async def angomart_get_products_by_category(
     store_id: int,
     catalogue_id: int,
     page: int = 1,
+    max_pages: int = 1,
 ) -> str:
-    """Lista produtos de uma categoria. Usa `angomart_list_categories` para obter catalogue_id."""
-    data = await _post(
-        "/api/get_products_for_category",
-        {
-            "domain_name": DOMAIN,
-            "marketplace_user_id": MARKETPLACE_USER_ID,
-            "user_id": store_id,
-            "catalogue_id": catalogue_id,
-            "page_no": page,
-            "post_to_get": 1,
-            "source": 0,
-            "dual_user_key": 0,
-            "language": "pt",
-        },
-        seed_store_id=store_id,
-    )
-    payload = data.get("data")
-    products = payload if isinstance(payload, list) else (payload or {}).get("products", []) or []
+    """Lista produtos de uma categoria; permite consultar várias páginas (máximo configurável)."""
+    if page < 1:
+        raise ValueError("A página começa em 1.")
+    max_pages = max(1, min(max_pages, MAX_PAGES))
+    products: list[dict] = []
+    for page_number in range(page, page + max_pages):
+        batch = await _get_products_page(store_id, catalogue_id, page_number)
+        if not batch:
+            break
+        products.extend(batch)
+        if len(batch) < 20:
+            break
     if not products:
-        return "Nenhum produto encontrado nessa categoria."
-
-    out = [f"Produtos ({len(products)} resultados, página {page}):\n"]
-    for p in products:
-        name = p.get("name", "?")
-        price = p.get("price", 0)
-        stock = p.get("available_quantity", 0)
-        sku = p.get("sku", "")
-        pid = p.get("product_id")
-        out.append(f"- {name}")
-        out.append(f"  Preço: {_fmt_price(price)}  |  SKU: {sku}  |  Stock: {stock}  |  product_id: {pid}")
-    return "\n".join(out)
+        return "Não foram encontrados produtos nesta categoria/página."
+    lines = [f"Produtos da categoria {catalogue_id} — {len(products)} resultado(s):"]
+    lines.extend(_format_product(p) for p in products)
+    return "\n".join(lines)
 
 
 @mcp.tool()
@@ -219,76 +305,99 @@ async def angomart_search_products(
     query: str,
     max_resultados: int = 20,
 ) -> str:
-    """Pesquisa produtos pelo nome em todas as categorias de uma loja (itera categorias; lento)."""
-    if len(query.strip()) < 2:
-        return "A pesquisa precisa de pelo menos 2 caracteres."
+    """Pesquisa produtos por nome, ignorando acentos e percorrendo subcategorias e páginas."""
+    limit = max(1, min(max_resultados, 100))
+    products = await _search(store_id, query, limit)
+    if not products:
+        return f"Não encontrei produtos para '{query}' na loja {store_id}."
+    return "\n".join([f"Resultados para '{query}' ({len(products)}):"] + [_format_product(p) for p in products])
 
-    cat_data = await _post(
-        "/api/catalogue/get",
-        {
-            "domain_name": DOMAIN,
-            "marketplace_user_id": MARKETPLACE_USER_ID,
-            "user_id": store_id,
-            "post_to_get": 1,
-            "source": 0,
-            "dual_user_key": 0,
-            "language": "pt",
-        },
-        seed_store_id=store_id,
-    )
-    payload = cat_data.get("data") or {}
-    cats = payload.get("result") or payload.get("catalogue") or []
 
-    flat: list[int] = []
-    for c in cats:
-        cid = c.get("catalogue_id")
-        if cid:
-            flat.append(cid)
-        for sub in c.get("sub_categories", []) or []:
-            sid = sub.get("catalogue_id")
-            if sid:
-                flat.append(sid)
+@mcp.tool()
+async def angomart_get_product_details(store_id: int, query: str) -> str:
+    """Procura um produto e devolve os dados de preço, stock, SKU e identificador disponíveis."""
+    products = await _search(store_id, query, 10)
+    if not products:
+        return f"Não encontrei '{query}' na loja {store_id}."
+    return "\n".join(["Produtos correspondentes (confirma o tamanho/unidade antes de comprar):"] + [
+        _format_product(p) for p in products
+    ])
 
-    q = query.lower().strip()
-    matches: list[dict] = []
-    for cid in flat:
-        if len(matches) >= max_resultados:
-            break
-        prod_data = await _post(
-            "/api/get_products_for_category",
-            {
-                "domain_name": DOMAIN,
-                "marketplace_user_id": MARKETPLACE_USER_ID,
-                "user_id": store_id,
-                "catalogue_id": cid,
-                "page_no": 1,
-                "post_to_get": 1,
-                "source": 0,
-                "dual_user_key": 0,
-                "language": "pt",
-            },
-            seed_store_id=store_id,
-        )
-        p_payload = prod_data.get("data")
-        products = p_payload if isinstance(p_payload, list) else (p_payload or {}).get("products", []) or []
-        for p in products:
-            if q in (p.get("name", "") or "").lower():
-                matches.append(p)
-                if len(matches) >= max_resultados:
-                    break
 
-    if not matches:
-        return f"Nenhum produto encontrado para '{query}' nessa loja."
+@mcp.tool()
+async def angomart_calculate_shopping_list(store_id: int, items_json: str) -> str:
+    """Calcula o custo estimado de uma lista. items_json: [{{"name":"arroz","quantity":2}}, ...].
+    A quantidade multiplica o preço unitário/embalagem apresentado pela loja; não converte kg/litros.
+    """
+    try:
+        items = json.loads(items_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("items_json tem de ser uma lista JSON válida.") from exc
+    if not isinstance(items, list) or not items:
+        raise ValueError("Indica pelo menos um artigo numa lista JSON.")
+    if len(items) > 50:
+        raise ValueError("O limite é de 50 artigos por lista.")
+    lines = [f"Estimativa de compras — loja {store_id}", "Nota: quantidade multiplica o preço da embalagem/unidade listada; confirma peso e volume."]
+    total = 0.0
+    missing: list[str] = []
+    for item in items:
+        if not isinstance(item, dict) or not item.get("name"):
+            continue
+        name = str(item["name"]).strip()
+        try:
+            quantity = float(item.get("quantity", 1))
+        except (TypeError, ValueError):
+            raise ValueError(f"Quantidade inválida para {name}.")
+        if quantity <= 0 or quantity > 10000:
+            raise ValueError(f"Quantidade fora do intervalo para {name}.")
+        matches = await _search(store_id, name, 5)
+        if not matches:
+            missing.append(name)
+            lines.append(f"- {name}: não encontrado")
+            continue
+        # Exact/closest text match first, otherwise use first catalogue result.
+        norm_name = _normalise(name)
+        matches.sort(key=lambda p: 0 if _normalise(str(p.get("name", ""))) == norm_name else 1)
+        product = matches[0]
+        try:
+            unit_price = float(product.get("price"))
+        except (TypeError, ValueError):
+            missing.append(name)
+            lines.append(f"- {name}: encontrado, mas sem preço legível")
+            continue
+        subtotal = unit_price * quantity
+        total += subtotal
+        lines.append(f"- {product.get('name')} × {quantity:g} — {_format_price(unit_price)} cada = {_format_price(subtotal)}")
+    lines.append(f"TOTAL ESTIMADO: {_format_price(total)}")
+    if missing:
+        lines.append("Artigos por confirmar: " + ", ".join(missing))
+    lines.append("Preços e stock podem mudar; isto é uma estimativa, não uma encomenda.")
+    return "\n".join(lines)
 
-    out = [f"Resultados para '{query}' ({len(matches)}):\n"]
-    for p in matches:
-        out.append(f"- {p.get('name')}")
-        out.append(
-            f"  Preço: {_fmt_price(p.get('price', 0))}  |  "
-            f"Stock: {p.get('available_quantity', 0)}  |  "
-            f"SKU: {p.get('sku', '')}  |  product_id: {p.get('product_id')}"
-        )
-    return "\n".join(out)
+
+@mcp.tool()
+async def angomart_compare_stores(store_ids: str, query: str) -> str:
+    """Compara os primeiros resultados de um produto em várias lojas. store_ids: IDs separados por vírgulas."""
+    try:
+        ids = [int(value.strip()) for value in store_ids.split(",") if value.strip()]
+    except ValueError as exc:
+        raise ValueError("store_ids deve conter IDs numéricos separados por vírgulas.") from exc
+    if not ids or len(ids) > 10:
+        raise ValueError("Indica entre 1 e 10 IDs de lojas.")
+    lines = [f"Comparação de '{query}':"]
+    for store_id in ids:
+        try:
+            products = await _search(store_id, query, 5)
+            if not products:
+                lines.append(f"- Loja {store_id}: não encontrado")
+                continue
+            lines.append(f"- Loja {store_id}: " + " | ".join(
+                f"{p.get('name')} — {_format_price(p.get('price'))}" for p in products[:3]
+            ))
+        except (RuntimeError, ValueError) as exc:
+            lines.append(f"- Loja {store_id}: erro — {exc}")
+    lines.append("Confirma se os produtos têm o mesmo peso, volume e marca antes de comparar.")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
