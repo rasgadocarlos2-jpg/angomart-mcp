@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "angomart": {
+      "command": "C:\\Users\\Carlos Rasgado\\Desktop\\angomart-mcp\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\Carlos Rasgado\\Desktop\\angomart-mcp\\server.py"
+      ]
+    }
+  }
+}
