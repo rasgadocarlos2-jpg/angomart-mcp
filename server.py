@@ -111,8 +111,22 @@ async def _request(method: str, path: str, payload: dict[str, Any], store_id: in
         raise RuntimeError(f"Não foi possível obter uma resposta válida do AngoMart: {exc}") from exc
 
     if result.get("status") == 100:
-        if HAS_PLAYWRIGHT and method.upper() == "POST":
-            seed = f"{BASE_URL}/en/store/Talatona/{store_id}" if store_id else f"{BASE_URL}/"
+        # O marketplace_reference_id pode ter expirado; tenta refrescar e repetir uma vez.
+        refreshed = await _refresh_marketplace_ref()
+        if refreshed and refreshed != data.get("marketplace_reference_id"):
+            data["marketplace_reference_id"] = refreshed
+            try:
+                if method.upper() == "GET":
+                    response = await client.get(f"{BASE_URL}{path}", params=data)
+                else:
+                    response = await client.post(f"{BASE_URL}{path}", json=data)
+                response.raise_for_status()
+                result = response.json()
+            except (httpx.HTTPError, ValueError):
+                pass
+    if result.get("status") == 100:
+        if HAS_PLAYWRIGHT:
+            seed = await _seed_url_for_store(store_id)
             result = await browser_fetch_json(seed, path, method, data)
         else:
             raise RuntimeError(
@@ -120,6 +134,39 @@ async def _request(method: str, path: str, payload: dict[str, Any], store_id: in
                 "Instala Playwright/Chromium ou configura ANGOMART_COOKIE."
             )
     return result
+
+
+async def _seed_url_for_store(store_id: Optional[int]) -> str:
+    """Devolve a URL de loja a usar como seed no Playwright, com slug correcto se conhecido."""
+    if not store_id:
+        return f"{BASE_URL}/"
+    # Tenta a cache de slugs primeiro.
+    slug = _cached(f"slug:{store_id}")
+    if slug:
+        return f"{BASE_URL}/en/store/{slug}/{store_id}"
+    # Fallback seguro: usar o store_id sem slug se o site aceitar, ou um placeholder.
+    # O AngoMart aceita slug incorrecto desde que o store_id resolva; "store" é neutro.
+    return f"{BASE_URL}/en/store/store/{store_id}"
+
+
+async def _refresh_marketplace_ref() -> Optional[str]:
+    """Refaz o warmup e devolve o novo marketplace_reference_id (ou None em caso de falha)."""
+    global _marketplace_ref
+    client = await _get_client()
+    try:
+        response = await client.get(
+            f"{BASE_URL}/api/marketplace_fetch_app_configuration",
+            params={"domain_name": DOMAIN, "post_to_get": 1, "dual_user_key": 0, "language": "pt"},
+        )
+        response.raise_for_status()
+        payload = response.json().get("data") or {}
+        _marketplace_ref = (
+            payload.get("marketplace_reference_id")
+            or (payload.get("marketplace") or {}).get("marketplace_reference_id")
+        )
+        return _marketplace_ref
+    except (httpx.HTTPError, ValueError, TypeError):
+        return None
 
 
 def _data_items(response: dict, *keys: str) -> list[dict]:
@@ -197,8 +244,11 @@ async def _get_products_page(store_id: int, catalogue_id: int, page: int) -> lis
         "post_to_get": 1, "source": 0, "dual_user_key": 0, "language": "pt",
     }, store_id)
     products = _data_items(response, "products", "result")
-    if not products and response.get("status") not in (0, "0", 1, "1", None):
-        raise RuntimeError(f"Erro ao consultar produtos (status={response.get('status')}, mensagem={response.get('message')}).")
+    # Só levantamos erro em códigos de erro conhecidos. Uma página vazia com
+    # status de sucesso (0/1/200/None) é um resultado legítimo ("sem produtos").
+    status = response.get("status")
+    if not products and status in (100, "100", -1, "-1"):
+        raise RuntimeError(f"Erro ao consultar produtos (status={status}, mensagem={response.get('message')}).")
     return _remember(key, products)
 
 
@@ -210,10 +260,13 @@ async def _search(store_id: int, query: str, limit: int = 20) -> list[dict]:
     matches: list[dict] = []
     for category in categories:
         cid = int(category["catalogue_id"])
+        first_page_size: Optional[int] = None
         for page in range(1, MAX_PAGES + 1):
             products = await _get_products_page(store_id, cid, page)
             if not products:
                 break
+            if first_page_size is None:
+                first_page_size = len(products)
             for product in products:
                 if q in _normalise(str(product.get("name") or "")):
                     product_copy = dict(product)
@@ -221,8 +274,9 @@ async def _search(store_id: int, query: str, limit: int = 20) -> list[dict]:
                     matches.append(product_copy)
                     if len(matches) >= limit:
                         return matches
-            # Sem metadados de paginação, uma página curta indica fim.
-            if len(products) < 20:
+            # Se a página devolver menos produtos que a primeira, assumimos fim.
+            # (O Yelo não expõe metadados de paginação, mas o tamanho de página é consistente.)
+            if len(products) < first_page_size:
                 break
     return matches
 
@@ -259,6 +313,9 @@ async def angomart_list_stores(
         name = store.get("name") or store.get("store_name") or store.get("storepage_slug") or "Loja"
         sid = store.get("user_id")
         slug = store.get("storepage_slug")
+        if sid and slug:
+            # Cache o slug para o fallback Playwright usar a URL correcta desta loja.
+            _remember(f"slug:{sid}", slug)
         lines.append(f"- {name} (store_id: {sid})" + (f" — {BASE_URL}/en/store/{slug}/{sid}" if slug else ""))
     return "\n".join(lines)
 
@@ -285,12 +342,16 @@ async def angomart_get_products_by_category(
         raise ValueError("A página começa em 1.")
     max_pages = max(1, min(max_pages, MAX_PAGES))
     products: list[dict] = []
+    first_page_size: Optional[int] = None
     for page_number in range(page, page + max_pages):
         batch = await _get_products_page(store_id, catalogue_id, page_number)
         if not batch:
             break
+        if first_page_size is None:
+            first_page_size = len(batch)
         products.extend(batch)
-        if len(batch) < 20:
+        # Páginas subsequentes mais curtas que a primeira indicam fim.
+        if len(batch) < first_page_size:
             break
     if not products:
         return "Não foram encontrados produtos nesta categoria/página."
@@ -326,8 +387,15 @@ async def angomart_get_product_details(store_id: int, query: str) -> str:
 
 @mcp.tool()
 async def angomart_calculate_shopping_list(store_id: int, items_json: str) -> str:
-    """Calcula o custo estimado de uma lista. items_json: [{{"name":"arroz","quantity":2}}, ...].
-    A quantidade multiplica o preço unitário/embalagem apresentado pela loja; não converte kg/litros.
+    """Calcula o custo estimado de uma lista.
+
+    items_json é uma lista JSON. Cada entrada tem o campo "name" (obrigatório)
+    e, opcionalmente, "quantity" (default 1). Exemplo:
+    [ {"name":"arroz","quantity":2}, {"name":"leite","quantity":1} ]
+
+    A quantidade multiplica o preço da embalagem/unidade listada. Quando não há
+    match exacto pelo nome, escolhe-se a embalagem MAIS BARATA e assinala-se
+    como ambíguo para o utilizador confirmar.
     """
     try:
         items = json.loads(items_json)
@@ -337,9 +405,9 @@ async def angomart_calculate_shopping_list(store_id: int, items_json: str) -> st
         raise ValueError("Indica pelo menos um artigo numa lista JSON.")
     if len(items) > 50:
         raise ValueError("O limite é de 50 artigos por lista.")
-    lines = [f"Estimativa de compras — loja {store_id}", "Nota: quantidade multiplica o preço da embalagem/unidade listada; confirma peso e volume."]
-    total = 0.0
-    missing: list[str] = []
+
+    # Validar e normalizar todos os itens primeiro, antes de qualquer HTTP.
+    normalized: list[tuple[str, float]] = []
     for item in items:
         if not isinstance(item, dict) or not item.get("name"):
             continue
@@ -350,27 +418,77 @@ async def angomart_calculate_shopping_list(store_id: int, items_json: str) -> st
             raise ValueError(f"Quantidade inválida para {name}.")
         if quantity <= 0 or quantity > 10000:
             raise ValueError(f"Quantidade fora do intervalo para {name}.")
-        matches = await _search(store_id, name, 5)
+        normalized.append((name, quantity))
+
+    # Pré-carregar categorias uma vez para popular a cache; depois pesquisar em paralelo.
+    await _get_categories(store_id)
+    search_results = await asyncio.gather(
+        *(_search(store_id, name, 5) for name, _ in normalized),
+        return_exceptions=True,
+    )
+
+    lines = [
+        f"Estimativa de compras — loja {store_id}",
+        "Nota: quantidade multiplica o preço da embalagem/unidade listada; não converte kg/litros.",
+    ]
+    total = 0.0
+    missing: list[str] = []
+    ambiguous: list[str] = []
+
+    for (name, quantity), result in zip(normalized, search_results):
+        if isinstance(result, BaseException):
+            missing.append(name)
+            lines.append(f"- {name}: erro na pesquisa — {result}")
+            continue
+        matches = result
         if not matches:
             missing.append(name)
             lines.append(f"- {name}: não encontrado")
             continue
-        # Exact/closest text match first, otherwise use first catalogue result.
+
         norm_name = _normalise(name)
-        matches.sort(key=lambda p: 0 if _normalise(str(p.get("name", ""))) == norm_name else 1)
-        product = matches[0]
+        exact = [p for p in matches if _normalise(str(p.get("name", ""))) == norm_name]
+        if exact:
+            chosen = exact[0]
+        else:
+            # Sem match exacto: escolher a embalagem mais barata (conservador para o orçamento)
+            # e avisar o utilizador para confirmar a variante.
+            priced = []
+            for p in matches:
+                try:
+                    priced.append((float(p.get("price")), p))
+                except (TypeError, ValueError):
+                    continue
+            if not priced:
+                missing.append(name)
+                lines.append(f"- {name}: encontrado, mas sem preço legível")
+                continue
+            priced.sort(key=lambda x: x[0])
+            chosen = priced[0][1]
+            ambiguous.append(name)
+
         try:
-            unit_price = float(product.get("price"))
+            unit_price = float(chosen.get("price"))
         except (TypeError, ValueError):
             missing.append(name)
             lines.append(f"- {name}: encontrado, mas sem preço legível")
             continue
         subtotal = unit_price * quantity
         total += subtotal
-        lines.append(f"- {product.get('name')} × {quantity:g} — {_format_price(unit_price)} cada = {_format_price(subtotal)}")
+        marker = " ⚠ confirma variante" if name in ambiguous else ""
+        lines.append(
+            f"- {chosen.get('name')} × {quantity:g} — {_format_price(unit_price)} cada = {_format_price(subtotal)}{marker}"
+        )
+
     lines.append(f"TOTAL ESTIMADO: {_format_price(total)}")
     if missing:
         lines.append("Artigos por confirmar: " + ", ".join(missing))
+    if ambiguous:
+        lines.append(
+            "Artigos sem match exacto (foi usada a embalagem mais barata): "
+            + ", ".join(ambiguous)
+            + ". Confirma peso/volume/marca antes de comprar."
+        )
     lines.append("Preços e stock podem mudar; isto é uma estimativa, não uma encomenda.")
     return "\n".join(lines)
 

@@ -75,7 +75,7 @@ Estimativa de lista de compras (quantidade multiplica o preço da embalagem/unid
 ```text
 angomart_calculate_shopping_list(
   store_id=1736945,
-  items_json="[{\\"name\\":\\"arroz\\",\\"quantity\\":2},{\\"name\\":\\"feijão\\",\\"quantity\\":1}]"
+  items_json='[{"name":"arroz","quantity":2},{"name":"feijão","quantity":1}]'
 )
 ```
 

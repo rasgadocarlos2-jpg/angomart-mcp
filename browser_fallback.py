@@ -31,6 +31,10 @@ async def _close_unlocked() -> None:
 
 async def _ensure_page(seed_url: str) -> "Page":
     global _pw, _browser, _context, _page
+    # Validar URL ANTES de alocar recursos — evita deixar o browser aberto num erro.
+    parsed = urlparse(seed_url)
+    if parsed.scheme != "https" or parsed.netloc != "www.angomart.com":
+        raise ValueError("O fallback do browser só aceita URLs oficiais do AngoMart.")
     if _page is not None:
         try:
             if _page.is_closed():
@@ -46,9 +50,6 @@ async def _ensure_page(seed_url: str) -> "Page":
             locale="pt-PT",
         )
         _page = await _context.new_page()
-    parsed = urlparse(seed_url)
-    if parsed.scheme != "https" or parsed.netloc != "www.angomart.com":
-        raise ValueError("O fallback do browser só aceita URLs oficiais do AngoMart.")
     if _page.url != seed_url:
         await _page.goto(seed_url, wait_until="domcontentloaded", timeout=30000)
         await _page.wait_for_timeout(1200)
