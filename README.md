@@ -19,6 +19,14 @@ Servidor MCP não-oficial para o **AngoMart** (Angola). Permite consultar lojas,
 | `angomart_get_product_details` | Procura correspondências e apresenta preço, stock e SKU disponíveis |
 | `angomart_calculate_shopping_list` | Calcula uma estimativa de custo para uma lista JSON |
 | `angomart_compare_stores` | Compara resultados de um produto em várias lojas |
+| `angomart_save_list` | Guarda uma lista de compras localmente (SQLite) |
+| `angomart_load_list` | Carrega uma lista guardada (opcionalmente recalcula preços) |
+| `angomart_list_saved_lists` | Enumera todas as listas guardadas |
+| `angomart_delete_list` | Apaga uma lista guardada |
+| `angomart_plan_monthly_shopping` | Plano mensal equilibrado para N pessoas × N semanas |
+| `angomart_budget_set` | Define o orçamento de um período (ex. '2026-11') |
+| `angomart_budget_record` | Regista uma despesa no período |
+| `angomart_budget_status` | Mostra limite, gasto, restante, lista de despesas |
 
 ## Instalação
 
@@ -44,6 +52,7 @@ Também podes definir:
 - `ANGOMART_CACHE_TTL`: cache em segundos (predefinição: 180).
 - `ANGOMART_MAX_PAGES`: máximo de páginas percorridas por categoria na pesquisa (predefinição: 5).
 - `ANGOMART_TIMEOUT`: timeout HTTP em segundos (predefinição: 25).
+- `ANGOMART_DB_PATH`: caminho do SQLite local (predefinição: `~/.angomart-mcp/history.db`).
 
 ## Configuração num cliente MCP
 

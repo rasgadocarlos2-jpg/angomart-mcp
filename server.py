@@ -23,6 +23,17 @@ except ImportError:
     async def browser_fetch_json(*_args: Any, **_kwargs: Any) -> dict:
         raise RuntimeError("Fallback Playwright indisponível")
 
+from storage import (
+    save_shopping_list as _storage_save,
+    load_shopping_list as _storage_load,
+    list_shopping_lists as _storage_list,
+    delete_shopping_list as _storage_delete,
+    set_budget as _storage_set_budget,
+    record_budget_entry as _storage_record,
+    budget_status as _storage_status,
+    monthly_shopping_items as _storage_monthly,
+)
+
 mcp = FastMCP("angomart")
 
 BASE_URL = "https://www.angomart.com"
@@ -515,6 +526,178 @@ async def angomart_compare_stores(store_ids: str, query: str) -> str:
         except (RuntimeError, ValueError) as exc:
             lines.append(f"- Loja {store_id}: erro — {exc}")
     lines.append("Confirma se os produtos têm o mesmo peso, volume e marca antes de comparar.")
+    return "\n".join(lines)
+
+
+def _fmt_ts(ts: int) -> str:
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+
+
+@mcp.tool()
+async def angomart_save_list(name: str, items_json: str, store_id: Optional[int] = None) -> str:
+    """Guarda uma lista de compras localmente (SQLite em ~/.angomart-mcp/history.db).
+
+    `name` é a chave da lista (sobrepõe se já existir). `items_json` tem o
+    mesmo formato que `angomart_calculate_shopping_list`: lista de
+    {"name": str, "quantity": number}.
+    """
+    name = name.strip()
+    if not name:
+        raise ValueError("Indica um nome para a lista.")
+    try:
+        items = json.loads(items_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("items_json tem de ser uma lista JSON válida.") from exc
+    if not isinstance(items, list) or not items:
+        raise ValueError("A lista precisa de pelo menos um artigo.")
+    result = _storage_save(name, store_id, items)
+    return (
+        f"Lista '{result['name']}' guardada "
+        f"({result['items_count']} artigo(s), store_id={result['store_id'] or 'n/d'}). "
+        f"Última actualização: {_fmt_ts(result['updated_at'])}."
+    )
+
+
+@mcp.tool()
+async def angomart_load_list(name: str, calculate: bool = False) -> str:
+    """Carrega uma lista guardada. Se `calculate=True`, recalcula o total com preços actuais."""
+    name = name.strip()
+    data = _storage_load(name)
+    if not data:
+        return f"Não existe nenhuma lista guardada com o nome '{name}'."
+    lines = [
+        f"Lista: {data['name']}",
+        f"Loja: {data['store_id'] or 'n/d'}",
+        f"Criada: {_fmt_ts(data['created_at'])} | Actualizada: {_fmt_ts(data['updated_at'])}",
+        f"Artigos ({len(data['items'])}):",
+    ]
+    for item in data["items"]:
+        lines.append(f"- {item.get('name')} × {item.get('quantity', 1)}")
+    if calculate and data["store_id"]:
+        lines.append("")
+        lines.append("=== Recalcular com preços actuais ===")
+        estimate = await angomart_calculate_shopping_list(
+            store_id=data["store_id"], items_json=json.dumps(data["items"], ensure_ascii=False)
+        )
+        lines.append(estimate)
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def angomart_list_saved_lists() -> str:
+    """Enumera todas as listas guardadas, mais recentes primeiro."""
+    entries = _storage_list()
+    if not entries:
+        return "Ainda não há listas guardadas."
+    lines = [f"Listas guardadas ({len(entries)}):"]
+    for e in entries:
+        lines.append(
+            f"- {e['name']} — {e['items_count']} artigo(s), loja {e['store_id'] or 'n/d'}, "
+            f"actualizada {_fmt_ts(e['updated_at'])}"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def angomart_delete_list(name: str) -> str:
+    """Apaga uma lista guardada."""
+    if _storage_delete(name.strip()):
+        return f"Lista '{name}' apagada."
+    return f"Não encontrei nenhuma lista com o nome '{name}'."
+
+
+@mcp.tool()
+async def angomart_plan_monthly_shopping(store_id: int, people: int = 4, weeks: int = 4) -> str:
+    """Planeia compras mensais para `people` pessoas durante `weeks` semanas.
+
+    Usa uma receita-base equilibrada (proteína, lácteos, hidratos, legumes,
+    fruta, básicos) com proporções típicas por pessoa/semana. Tenta calcular
+    o custo estimado consultando o catálogo; se o catálogo estiver
+    indisponível devolve apenas a lista agregada sem preços.
+    """
+    if people < 1 or people > 20:
+        raise ValueError("Indica entre 1 e 20 pessoas.")
+    if weeks < 1 or weeks > 12:
+        raise ValueError("Indica entre 1 e 12 semanas.")
+    items = _storage_monthly(people, weeks)
+    items_json = json.dumps(items, ensure_ascii=False)
+    header = (
+        f"Plano de compras — {people} pessoa(s) × {weeks} semana(s) — loja {store_id}\n"
+        f"Receita-base agregada ({len(items)} artigos distintos):\n"
+    )
+    try:
+        estimate = await angomart_calculate_shopping_list(store_id=store_id, items_json=items_json)
+        return header + estimate
+    except (RuntimeError, ValueError) as exc:
+        # Catálogo indisponível: devolve pelo menos a lista para o utilizador
+        # usar como ponto de partida.
+        lines = [header, "⚠ Catálogo indisponível — a lista abaixo não tem preços."]
+        lines.append(f"Motivo: {exc}")
+        lines.append("")
+        for item in items:
+            lines.append(f"- {item['name']} × {item['quantity']:g}")
+        lines.append("")
+        lines.append("Dica: tenta `angomart_calculate_shopping_list` mais tarde ou guarda a lista com `angomart_save_list`.")
+        return "\n".join(lines)
+
+
+@mcp.tool()
+async def angomart_budget_set(period: str, limit_kz: float, notes: Optional[str] = None) -> str:
+    """Define o orçamento para um período (ex. '2026-11' ou 'nov-2026-casa'). Em Kz."""
+    period = period.strip()
+    if not period:
+        raise ValueError("Indica um identificador de período (ex. '2026-11').")
+    if limit_kz <= 0 or limit_kz > 1e10:
+        raise ValueError("O limite tem de ser um valor positivo razoável.")
+    r = _storage_set_budget(period, float(limit_kz), notes)
+    return f"Orçamento definido: {r['period']} = {_format_price(r['limit_kz'])}" + (f" (nota: {notes})" if notes else "")
+
+
+@mcp.tool()
+async def angomart_budget_record(period: str, label: str, amount_kz: float) -> str:
+    """Regista uma despesa num período. Pode ser usado após `calculate_shopping_list` para abater ao orçamento."""
+    period = period.strip()
+    label = label.strip()
+    if not period or not label:
+        raise ValueError("Indica period e label.")
+    if amount_kz <= 0 or amount_kz > 1e10:
+        raise ValueError("Valor inválido.")
+    r = _storage_record(period, label, float(amount_kz))
+    status = _storage_status(period)
+    lines = [
+        f"Registado: '{label}' = {_format_price(r['amount_kz'])} em {period}.",
+        f"Total gasto: {_format_price(status['spent_kz'])} / {_format_price(status['limit_kz'])}",
+    ]
+    if status["pct_used"] is not None:
+        lines.append(f"Utilização: {status['pct_used']:.1f}%")
+    if status["remaining_kz"] < 0:
+        lines.append(f"⚠ Orçamento excedido em {_format_price(abs(status['remaining_kz']))}.")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def angomart_budget_status(period: str) -> str:
+    """Mostra o estado de um orçamento: limite, gasto, restante, lista de despesas."""
+    s = _storage_status(period.strip())
+    if s["limit_kz"] == 0 and not s["entries"]:
+        return f"Não existe orçamento definido para '{period}'."
+    lines = [
+        f"Orçamento {s['period']}:",
+        f"- Limite: {_format_price(s['limit_kz'])}",
+        f"- Gasto: {_format_price(s['spent_kz'])}",
+        f"- Restante: {_format_price(s['remaining_kz'])}",
+    ]
+    if s["pct_used"] is not None:
+        lines.append(f"- Utilização: {s['pct_used']:.1f}%")
+    if s["notes"]:
+        lines.append(f"- Nota: {s['notes']}")
+    if s["entries"]:
+        lines.append("")
+        lines.append("Despesas:")
+        for e in s["entries"]:
+            lines.append(f"  · {_fmt_ts(e['created_at'])} — {e['label']}: {_format_price(e['amount_kz'])}")
+    if s["remaining_kz"] < 0:
+        lines.append(f"\n⚠ Orçamento excedido em {_format_price(abs(s['remaining_kz']))}.")
     return "\n".join(lines)
 
 

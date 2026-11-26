@@ -52,7 +52,20 @@ async def _ensure_page(seed_url: str) -> "Page":
         _page = await _context.new_page()
     if _page.url != seed_url:
         await _page.goto(seed_url, wait_until="domcontentloaded", timeout=30000)
-        await _page.wait_for_timeout(1200)
+        # Aguarda a app inicializar completamente: estabelece cookies de sessão,
+        # chama marketplace_fetch_app_configuration, e só depois o catálogo fica
+        # acessível. 1.2s não chega em ligações lentas.
+        try:
+            await _page.wait_for_function(
+                "() => localStorage.getItem('marketplace_reference_id') && "
+                "localStorage.getItem('stores')",
+                timeout=20000,
+            )
+        except Exception:
+            # Se não aparecer no prazo, continuamos de qualquer modo —
+            # a página pode ter forma diferente num futuro deploy.
+            pass
+        await _page.wait_for_timeout(2000)
     return _page
 
 
@@ -82,9 +95,45 @@ async def browser_fetch_json(seed_url: str, path: str, method: str = "POST",
             )
             return result
         except Exception:
-            # A página pode ter ficado inválida; recriar no próximo pedido.
             await _close_unlocked()
             raise
+
+
+async def read_cached_products(seed_url: str) -> list[dict[str, Any]]:
+    """Lê produtos pré-carregados em localStorage.app da app AngoMart.
+
+    A app Yelo guarda produtos navegados em `localStorage['app'].product`
+    como `{catalogue_id: [{product_name, cost, available_quantity, ...}]}`.
+    Esta função devolve tudo o que estiver em cache no momento. Útil quando
+    a API bloqueia chamadas directas (status 100).
+    """
+    if not HAS_PLAYWRIGHT:
+        raise RuntimeError("Playwright indisponível.")
+    async with _lock:
+        page = await _ensure_page(seed_url)
+        data = await page.evaluate(
+            """() => {
+                try {
+                    const raw = localStorage.getItem('app');
+                    if (!raw) return [];
+                    const parsed = JSON.parse(decodeURIComponent(raw));
+                    const products = parsed.product || {};
+                    const out = [];
+                    for (const [catId, list] of Object.entries(products)) {
+                        for (const p of list) out.push({
+                            name: p.product_name,
+                            price: p.cost,
+                            available_quantity: p.available_quantity,
+                            sku: p.sku,
+                            product_id: p.product_id,
+                            catalogue_id: Number(catId),
+                        });
+                    }
+                    return out;
+                } catch (e) { return []; }
+            }"""
+        )
+        return data or []
 
 
 async def close_browser() -> None:
