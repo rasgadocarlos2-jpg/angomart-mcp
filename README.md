@@ -18,7 +18,7 @@ Inspirado no [continente-mcp](https://github.com/andredelgado/continente-mcp) do
 ## Instalação
 
 ```bash
-git clone https://github.com/<user>/angomart-mcp.git
+git clone https://github.com/rasgadocarlos2-jpg/angomart-mcp.git
 cd angomart-mcp
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
