@@ -10,6 +10,14 @@ from typing import Optional
 import httpx
 from mcp.server.fastmcp import FastMCP
 
+try:
+    from browser_fallback import browser_fetch_json, HAS_PLAYWRIGHT
+except ImportError:
+    HAS_PLAYWRIGHT = False
+
+    async def browser_fetch_json(*_a, **_kw):
+        raise RuntimeError("playwright fallback not available")
+
 mcp = FastMCP("angomart")
 
 BASE_URL = "https://www.angomart.com"
@@ -75,14 +83,20 @@ async def _get(path: str, params: dict) -> dict:
     return r.json()
 
 
-async def _post(path: str, body: dict) -> dict:
+async def _post(path: str, body: dict, seed_store_id: Optional[int] = None) -> dict:
     client = await _get_client()
     body = {**body}
     if _marketplace_ref and "marketplace_reference_id" not in body:
         body["marketplace_reference_id"] = _marketplace_ref
     r = await client.post(f"{BASE_URL}{path}", json=body)
     r.raise_for_status()
-    return r.json()
+    j = r.json()
+    # Anti-bot block: fall back to a real browser if available
+    if j.get("status") == 100 and HAS_PLAYWRIGHT:
+        store_id = seed_store_id or body.get("user_id")
+        seed = f"{BASE_URL}/en/store/Talatona/{store_id}" if store_id else f"{BASE_URL}/"
+        return await browser_fetch_json(seed, path, "POST", body)
+    return j
 
 
 def _fmt_price(kz) -> str:
@@ -145,6 +159,7 @@ async def angomart_list_categories(store_id: int) -> str:
             "dual_user_key": 0,
             "language": "pt",
         },
+        seed_store_id=store_id,
     )
     payload = data.get("data") or {}
     cats = payload.get("result") or payload.get("catalogue") or payload.get("categories") or []
@@ -179,6 +194,7 @@ async def angomart_get_products_by_category(
             "dual_user_key": 0,
             "language": "pt",
         },
+        seed_store_id=store_id,
     )
     payload = data.get("data")
     products = payload if isinstance(payload, list) else (payload or {}).get("products", []) or []
@@ -218,6 +234,7 @@ async def angomart_search_products(
             "dual_user_key": 0,
             "language": "pt",
         },
+        seed_store_id=store_id,
     )
     payload = cat_data.get("data") or {}
     cats = payload.get("result") or payload.get("catalogue") or []
@@ -250,6 +267,7 @@ async def angomart_search_products(
                 "dual_user_key": 0,
                 "language": "pt",
             },
+            seed_store_id=store_id,
         )
         p_payload = prod_data.get("data")
         products = p_payload if isinstance(p_payload, list) else (p_payload or {}).get("products", []) or []

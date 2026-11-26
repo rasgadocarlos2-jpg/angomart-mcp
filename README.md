@@ -1,6 +1,13 @@
 # angomart-mcp
 
+[![MCP](https://img.shields.io/badge/MCP-compatible-5A67D8?logo=anthropic&logoColor=white)](https://modelcontextprotocol.io)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Angola](https://img.shields.io/badge/🇦🇴-Angola-000000)]()
+
 Servidor MCP não-oficial para o **AngoMart** (Angola). Permite que Claude, Cursor, ChatGPT ou qualquer cliente MCP consulte lojas, categorias e produtos directamente do catálogo online do AngoMart.
+
+![demo](docs/demo.svg)
 
 > Não-oficial. Este projeto é independente do AngoMart e da Jungleworks. Usa a API pública do site e pode deixar de funcionar se o site mudar.
 
@@ -84,13 +91,16 @@ Sem Playwright, sem scraping HTML. Só JSON.
 - Não faz login, não adiciona ao carrinho, não submete encomendas (por desenho).
 - A pesquisa por nome é client-side (itera categorias) — lenta em lojas grandes.
 - Preços e stock podem estar desatualizados em relação à loja física.
-- A listagem de lojas (`angomart_list_stores`) funciona directamente. As ferramentas de catálogo e produtos usam endpoints que o AngoMart protege contra scraping directo: podem retornar `status: 100` fora do navegador. Se acontecer, podes passar um cookie do navegador através da variável de ambiente `ANGOMART_COOKIE` (copia o `Cookie` header de um pedido real a `www.angomart.com` nas DevTools do browser).
+- A listagem de lojas (`angomart_list_stores`) funciona directamente. As ferramentas de catálogo e produtos usam endpoints que o AngoMart protege contra scraping directo: podem retornar `status: 100` fora do navegador. Duas formas de contornar:
+  1. **Playwright fallback** (recomendado): `pip install playwright && playwright install chromium`. O server detecta automaticamente `status: 100` e refaz a chamada dentro de um Chromium headless.
+  2. **Cookie manual**: define `ANGOMART_COOKIE` com o header `Cookie` copiado das DevTools do browser.
 
 ## Roadmap
 
-- [ ] Fallback Playwright para endpoints protegidos (como o continente-mcp faz)
+- [x] Fallback Playwright para endpoints protegidos (como o continente-mcp faz)
 - [ ] Suporte a outras cidades / coordenadas por configuração
 - [ ] Adaptador `kibabo-mcp` (loja Kibabo em Angola, stack Redicom Prolepse)
+- [ ] Adaptador `tupuca-mcp` (super-app de delivery angolana, mesma stack Yelo)
 
 ## Licença
 

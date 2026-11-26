@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 420" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a1b26"/>
+      <stop offset="1" stop-color="#16161e"/>
+    </linearGradient>
+  </defs>
+  <rect width="760" height="420" rx="10" fill="url(#bg)"/>
+  <!-- window chrome -->
+  <circle cx="20" cy="22" r="6" fill="#ff5f56"/>
+  <circle cx="40" cy="22" r="6" fill="#ffbd2e"/>
+  <circle cx="60" cy="22" r="6" fill="#27c93f"/>
+  <text x="380" y="27" fill="#a9b1d6" text-anchor="middle" font-size="12">Claude Desktop — angomart-mcp</text>
+
+  <!-- lines -->
+  <g fill="#c0caf5">
+    <text x="22" y="70"><tspan fill="#7aa2f7">you</tspan> ▸ Lista as lojas AngoMart mais próximas de Talatona.</text>
+
+    <text x="22" y="105" opacity="0"><tspan fill="#9ece6a">claude</tspan> ▸ chamando <tspan fill="#e0af68">angomart_list_stores</tspan>...
+      <animate attributeName="opacity" from="0" to="1" begin="0.5s" dur="0.3s" fill="freeze"/>
+    </text>
+
+    <text x="22" y="135" opacity="0">
+      <tspan fill="#73daca">·</tspan> AngoMart Talatona (store_id: 1736945)
+      <animate attributeName="opacity" from="0" to="1" begin="1.2s" dur="0.3s" fill="freeze"/>
+    </text>
+    <text x="22" y="155" opacity="0">
+      <tspan fill="#73daca">·</tspan> AngoMart Kilamba (store_id: 3536823)
+      <animate attributeName="opacity" from="0" to="1" begin="1.5s" dur="0.3s" fill="freeze"/>
+    </text>
+    <text x="22" y="175" opacity="0">
+      <tspan fill="#73daca">·</tspan> AngoMart Vila-Brevemente (store_id: 3536827)
+      <animate attributeName="opacity" from="0" to="1" begin="1.8s" dur="0.3s" fill="freeze"/>
+    </text>
+
+    <text x="22" y="220" opacity="0">
+      <tspan fill="#7aa2f7">you</tspan> ▸ Procura "arroz" na loja de Talatona.
+      <animate attributeName="opacity" from="0" to="1" begin="2.8s" dur="0.3s" fill="freeze"/>
+    </text>
+
+    <text x="22" y="250" opacity="0">
+      <tspan fill="#9ece6a">claude</tspan> ▸ chamando <tspan fill="#e0af68">angomart_search_products</tspan>...
+      <animate attributeName="opacity" from="0" to="1" begin="3.3s" dur="0.3s" fill="freeze"/>
+    </text>
+
+    <text x="22" y="285" opacity="0">
+      <tspan fill="#73daca">·</tspan> ARROZ AGULHA CARUPO 1KG
+      <animate attributeName="opacity" from="0" to="1" begin="4.0s" dur="0.3s" fill="freeze"/>
+    </text>
+    <text x="40" y="303" opacity="0" fill="#565f89">
+      1.890 Kz  ·  stock: 42
+      <animate attributeName="opacity" from="0" to="1" begin="4.1s" dur="0.3s" fill="freeze"/>
+    </text>
+    <text x="22" y="325" opacity="0">
+      <tspan fill="#73daca">·</tspan> ARROZ BASMATI PEARL 1KG
+      <animate attributeName="opacity" from="0" to="1" begin="4.4s" dur="0.3s" fill="freeze"/>
+    </text>
+    <text x="40" y="343" opacity="0" fill="#565f89">
+      2.490 Kz  ·  stock: 18
+      <animate attributeName="opacity" from="0" to="1" begin="4.5s" dur="0.3s" fill="freeze"/>
+    </text>
+    <text x="22" y="365" opacity="0">
+      <tspan fill="#73daca">·</tspan> ARROZ JASMIM CARUPO 1KG
+      <animate attributeName="opacity" from="0" to="1" begin="4.8s" dur="0.3s" fill="freeze"/>
+    </text>
+    <text x="40" y="383" opacity="0" fill="#565f89">
+      2.190 Kz  ·  stock: 67
+      <animate attributeName="opacity" from="0" to="1" begin="4.9s" dur="0.3s" fill="freeze"/>
+    </text>
+
+    <!-- cursor -->
+    <rect x="22" y="398" width="8" height="2" fill="#7aa2f7">
+      <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+</svg>
