@@ -16,11 +16,14 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 try:
-    from browser_fallback import browser_fetch_json, HAS_PLAYWRIGHT
+    from browser_fallback import browser_fetch_json, scrape_full_catalogue, HAS_PLAYWRIGHT
 except ImportError:
     HAS_PLAYWRIGHT = False
 
     async def browser_fetch_json(*_args: Any, **_kwargs: Any) -> dict:
+        raise RuntimeError("Fallback Playwright indisponível")
+
+    async def scrape_full_catalogue(*_args: Any, **_kwargs: Any) -> dict:
         raise RuntimeError("Fallback Playwright indisponível")
 
 from storage import (
@@ -232,16 +235,36 @@ async def _get_categories(store_id: int) -> list[dict]:
     cached = _cached(key)
     if cached is not None:
         return cached
-    response = await _request("POST", "/api/catalogue/get", {
-        "domain_name": DOMAIN, "marketplace_user_id": MARKETPLACE_USER_ID,
-        "user_id": store_id, "post_to_get": 1, "source": 0,
-        "dual_user_key": 0, "language": "pt",
-    }, store_id)
-    data = response.get("data") or {}
-    categories = (data.get("result") or data.get("catalogue") or data.get("categories") or []) if isinstance(data, dict) else []
-    if not categories:
-        raise RuntimeError(f"Não foi possível obter categorias (status={response.get('status')}, mensagem={response.get('message')}).")
-    return _remember(key, categories)
+    try:
+        response = await _request("POST", "/api/catalogue/get", {
+            "domain_name": DOMAIN, "marketplace_user_id": MARKETPLACE_USER_ID,
+            "user_id": store_id, "post_to_get": 1, "source": 0,
+            "dual_user_key": 0, "language": "pt",
+        }, store_id)
+        data = response.get("data") or {}
+        categories = (data.get("result") or data.get("catalogue") or data.get("categories") or []) if isinstance(data, dict) else []
+        if categories:
+            return _remember(key, categories)
+    except RuntimeError:
+        pass
+    # Fallback: scrape full catalogue via DOM (lento mas fiável).
+    if HAS_PLAYWRIGHT:
+        scraped = await _get_scraped_catalogue(store_id)
+        categories = [{"name": c["name"], "catalogue_id": c["catalogue_id"], "sub_categories": []} for c in scraped["categories"]]
+        if categories:
+            return _remember(key, categories)
+    raise RuntimeError("Não foi possível obter categorias (API bloqueada e Playwright indisponível).")
+
+
+async def _get_scraped_catalogue(store_id: int) -> dict:
+    """Obtém catálogo completo scraped (categorias + produtos). Cache longa."""
+    key = f"scraped:{store_id}"
+    cached = _cached(key)
+    if cached is not None:
+        return cached
+    seed = await _seed_url_for_store(store_id)
+    data = await scrape_full_catalogue(seed)
+    return _remember(key, data)
 
 
 async def _get_products_page(store_id: int, catalogue_id: int, page: int) -> list[dict]:
@@ -249,18 +272,25 @@ async def _get_products_page(store_id: int, catalogue_id: int, page: int) -> lis
     cached = _cached(key)
     if cached is not None:
         return cached
-    response = await _request("POST", "/api/get_products_for_category", {
-        "domain_name": DOMAIN, "marketplace_user_id": MARKETPLACE_USER_ID,
-        "user_id": store_id, "catalogue_id": catalogue_id, "page_no": page,
-        "post_to_get": 1, "source": 0, "dual_user_key": 0, "language": "pt",
-    }, store_id)
-    products = _data_items(response, "products", "result")
-    # Só levantamos erro em códigos de erro conhecidos. Uma página vazia com
-    # status de sucesso (0/1/200/None) é um resultado legítimo ("sem produtos").
-    status = response.get("status")
-    if not products and status in (100, "100", -1, "-1"):
-        raise RuntimeError(f"Erro ao consultar produtos (status={status}, mensagem={response.get('message')}).")
-    return _remember(key, products)
+    try:
+        response = await _request("POST", "/api/get_products_for_category", {
+            "domain_name": DOMAIN, "marketplace_user_id": MARKETPLACE_USER_ID,
+            "user_id": store_id, "catalogue_id": catalogue_id, "page_no": page,
+            "post_to_get": 1, "source": 0, "dual_user_key": 0, "language": "pt",
+        }, store_id)
+        products = _data_items(response, "products", "result")
+        status = response.get("status")
+        if products or status not in (100, "100", -1, "-1"):
+            return _remember(key, products)
+    except RuntimeError:
+        pass
+    # Fallback: scraped catalogue tem tudo na página 1 (sem paginação).
+    if HAS_PLAYWRIGHT and page == 1:
+        scraped = await _get_scraped_catalogue(store_id)
+        for c in scraped["categories"]:
+            if c["catalogue_id"] == catalogue_id:
+                return _remember(key, c["products"])
+    return _remember(key, [])
 
 
 async def _search(store_id: int, query: str, limit: int = 20) -> list[dict]:
@@ -526,6 +556,44 @@ async def angomart_compare_stores(store_ids: str, query: str) -> str:
         except (RuntimeError, ValueError) as exc:
             lines.append(f"- Loja {store_id}: erro — {exc}")
     lines.append("Confirma se os produtos têm o mesmo peso, volume e marca antes de comparar.")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def angomart_scrape_catalogue(store_id: int) -> str:
+    """Scrape o catálogo completo de uma loja via browser (DOM scraping).
+
+    Lento (~2-5 min para loja grande) mas fiável quando a API bloqueia
+    chamadas directas. Resultado é cached durante `ANGOMART_CACHE_TTL`
+    segundos (predefinição 180s — recomenda-se aumentar para 3600).
+    """
+    if not HAS_PLAYWRIGHT:
+        raise RuntimeError("Playwright não está instalado. Instala com `pip install -e '.[browser]'`.")
+    data = await _get_scraped_catalogue(store_id)
+    return (
+        f"Catálogo da loja {store_id} scraped:\n"
+        f"- Categorias: {len(data['categories'])}\n"
+        f"- Produtos totais: {data['total_products']}\n"
+        f"Dica: usa `angomart_catalogue_stats({store_id})` para distribuição por categoria."
+    )
+
+
+@mcp.tool()
+async def angomart_catalogue_stats(store_id: int) -> str:
+    """Estatísticas do catálogo: número de produtos por categoria, totais, gama de preços."""
+    data = await _get_scraped_catalogue(store_id)
+    lines = [f"Estatísticas do catálogo — loja {store_id}:"]
+    lines.append(f"- Total categorias: {len(data['categories'])}")
+    lines.append(f"- Total produtos: {data['total_products']}")
+    all_prices = [p["price"] for c in data["categories"] for p in c["products"] if p.get("price")]
+    if all_prices:
+        lines.append(f"- Preço mínimo: {_format_price(min(all_prices))}")
+        lines.append(f"- Preço máximo: {_format_price(max(all_prices))}")
+        lines.append(f"- Preço médio: {_format_price(sum(all_prices) / len(all_prices))}")
+    lines.append("")
+    lines.append("Produtos por categoria:")
+    for c in sorted(data["categories"], key=lambda x: -len(x["products"])):
+        lines.append(f"- {c['name']}: {len(c['products'])}")
     return "\n".join(lines)
 
 
