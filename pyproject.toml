@@ -1,7 +1,7 @@
 [project]
 name = "angomart-mcp"
-version = "0.1.0"
-description = "Unofficial MCP server for AngoMart (Angola): list stores, categories, and products."
+version = "0.2.0"
+description = "Unofficial MCP server for AngoMart (Angola): stores, catalogue, prices and shopping lists."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
@@ -13,6 +13,7 @@ dependencies = [
 
 [project.optional-dependencies]
 browser = ["playwright>=1.40.0"]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0", "ruff>=0.5.0"]
 
 [project.scripts]
 angomart-mcp = "server:mcp.run"
@@ -20,3 +21,6 @@ angomart-mcp = "server:mcp.run"
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["server", "browser_fallback"]
