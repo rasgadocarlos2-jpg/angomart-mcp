@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1125" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a1b26"/>
+      <stop offset="1" stop-color="#16161e"/>
+    </linearGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e63946"/>
+      <stop offset="1" stop-color="#d62828"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="1125" fill="url(#bg)"/>
+
+  <!-- header -->
+  <rect x="0" y="0" width="900" height="110" fill="url(#red)"/>
+  <text x="40" y="55" font-size="32" font-weight="700" fill="white" font-family="Inter,Segoe UI,Arial,sans-serif">angomart-mcp</text>
+  <text x="40" y="88" font-size="16" fill="#ffd1d1" font-family="Inter,Segoe UI,Arial,sans-serif">Lista de compras semanal · 2 pessoas · AngoMart Talatona</text>
+  <text x="860" y="55" font-size="32" fill="white" text-anchor="end" font-family="Inter,Segoe UI,Arial,sans-serif">🇦🇴</text>
+
+  <!-- question -->
+  <text x="40" y="160" font-size="15" fill="#7aa2f7">you ▸</text>
+  <text x="90" y="160" font-size="15" fill="#c0caf5">Planeia uma semana de compras no AngoMart para 2 pessoas. Proteína, lácteo, carbos, legumes, fruta.</text>
+
+  <!-- claude thinking -->
+  <text x="40" y="200" font-size="15" fill="#9ece6a" opacity="0">
+    claude ▸ chamando <tspan fill="#e0af68">angomart_list_stores</tspan> + 4× <tspan fill="#e0af68">angomart_get_products_by_category</tspan>...
+    <animate attributeName="opacity" from="0" to="1" begin="0.3s" dur="0.4s" fill="freeze"/>
+  </text>
+
+  <!-- category: Proteína -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="1s" dur="0.4s" fill="freeze"/>
+    <rect x="40" y="235" width="820" height="36" rx="6" fill="#2a2f45"/>
+    <text x="55" y="259" font-size="16" fill="#e0af68" font-weight="700">🥩 PROTEÍNA</text>
+    <text x="760" y="259" font-size="14" fill="#565f89" text-anchor="end">— 15.370 Kz</text>
+  </g>
+  <g fill="#c0caf5" font-size="14">
+    <text x="55" y="298" opacity="0">· 2 kg peito frango s/osso (Frango-Lar)<animate attributeName="opacity" from="0" to="1" begin="1.3s" dur="0.3s" fill="freeze"/></text>
+    <text x="760" y="298" fill="#73daca" text-anchor="end" opacity="0">9.990 Kz<animate attributeName="opacity" from="0" to="1" begin="1.3s" dur="0.3s" fill="freeze"/></text>
+    <text x="55" y="321" opacity="0">· 1 kg linguiça de porco (Sanodia)<animate attributeName="opacity" from="0" to="1" begin="1.5s" dur="0.3s" fill="freeze"/></text>
+    <text x="760" y="321" fill="#73daca" text-anchor="end" opacity="0">3.990 Kz<animate attributeName="opacity" from="0" to="1" begin="1.5s" dur="0.3s" fill="freeze"/></text>
+    <text x="55" y="344" opacity="0">· 300 g macedónia de legumes congelada<animate attributeName="opacity" from="0" to="1" begin="1.7s" dur="0.3s" fill="freeze"/></text>
+    <text x="760" y="344" fill="#73daca" text-anchor="end" opacity="0">1.390 Kz<animate attributeName="opacity" from="0" to="1" begin="1.7s" dur="0.3s" fill="freeze"/></text>
+  </g>
+
+  <!-- Lácteos -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="2s" dur="0.4s" fill="freeze"/>
+    <rect x="40" y="375" width="820" height="36" rx="6" fill="#2a2f45"/>
+    <text x="55" y="399" font-size="16" fill="#e0af68" font-weight="700">🥛 LÁCTEOS</text>
+    <text x="760" y="399" font-size="14" fill="#565f89" text-anchor="end">— 2.580 Kz</text>
+  </g>
+  <g fill="#c0caf5" font-size="14">
+    <text x="55" y="438" opacity="0">· 2 L leite UHT gordo Lactiangol<animate attributeName="opacity" from="0" to="1" begin="2.3s" dur="0.3s" fill="freeze"/></text>
+    <text x="760" y="438" fill="#73daca" text-anchor="end" opacity="0">2.580 Kz<animate attributeName="opacity" from="0" to="1" begin="2.3s" dur="0.3s" fill="freeze"/></text>
+  </g>
+
+  <!-- Carbos -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="2.6s" dur="0.4s" fill="freeze"/>
+    <rect x="40" y="470" width="820" height="36" rx="6" fill="#2a2f45"/>
+    <text x="55" y="494" font-size="16" fill="#e0af68" font-weight="700">🌾 HIDRATOS</text>
+    <text x="760" y="494" font-size="14" fill="#565f89" text-anchor="end">— 4.080 Kz</text>
+  </g>
+  <g fill="#c0caf5" font-size="14">
+    <text x="55" y="533" opacity="0">· 2 kg arroz branco UAMI (2× 1 kg)<animate attributeName="opacity" from="0" to="1" begin="2.9s" dur="0.3s" fill="freeze"/></text>
+    <text x="760" y="533" fill="#73daca" text-anchor="end" opacity="0">2.180 Kz<animate attributeName="opacity" from="0" to="1" begin="2.9s" dur="0.3s" fill="freeze"/></text>
+    <text x="55" y="556" opacity="0">· 2 kg batata rena branca nacional<animate attributeName="opacity" from="0" to="1" begin="3.1s" dur="0.3s" fill="freeze"/></text>
+    <text x="760" y="556" fill="#73daca" text-anchor="end" opacity="0">1.900 Kz<animate attributeName="opacity" from="0" to="1" begin="3.1s" dur="0.3s" fill="freeze"/></text>
+  </g>
+
+  <!-- Legumes -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="3.4s" dur="0.4s" fill="freeze"/>
+    <rect x="40" y="587" width="820" height="36" rx="6" fill="#2a2f45"/>
+    <text x="55" y="611" font-size="16" fill="#e0af68" font-weight="700">🥕 LEGUMES</text>
+    <text x="760" y="611" font-size="14" fill="#565f89" text-anchor="end">— 1.590 Kz</text>
+  </g>
+  <g fill="#c0caf5" font-size="14">
+    <text x="55" y="650" opacity="0">· 1 kg cenoura<animate attributeName="opacity" from="0" to="1" begin="3.7s" dur="0.3s" fill="freeze"/></text>
+    <text x="760" y="650" fill="#73daca" text-anchor="end" opacity="0">1.590 Kz<animate attributeName="opacity" from="0" to="1" begin="3.7s" dur="0.3s" fill="freeze"/></text>
+  </g>
+
+  <!-- Fruta -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="4s" dur="0.4s" fill="freeze"/>
+    <rect x="40" y="681" width="820" height="36" rx="6" fill="#2a2f45"/>
+    <text x="55" y="705" font-size="16" fill="#e0af68" font-weight="700">🍎 FRUTA</text>
+    <text x="760" y="705" font-size="14" fill="#565f89" text-anchor="end">— 5.850 Kz</text>
+  </g>
+  <g fill="#c0caf5" font-size="14">
+    <text x="55" y="744" opacity="0">· 1 kg maçã Golden<animate attributeName="opacity" from="0" to="1" begin="4.3s" dur="0.3s" fill="freeze"/></text>
+    <text x="760" y="744" fill="#73daca" text-anchor="end" opacity="0">2.690 Kz<animate attributeName="opacity" from="0" to="1" begin="4.3s" dur="0.3s" fill="freeze"/></text>
+    <text x="55" y="767" opacity="0">· 1 kg mamão<animate attributeName="opacity" from="0" to="1" begin="4.5s" dur="0.3s" fill="freeze"/></text>
+    <text x="760" y="767" fill="#73daca" text-anchor="end" opacity="0">790 Kz<animate attributeName="opacity" from="0" to="1" begin="4.5s" dur="0.3s" fill="freeze"/></text>
+    <text x="55" y="790" opacity="0">· 1 melancia (~3 kg)<animate attributeName="opacity" from="0" to="1" begin="4.7s" dur="0.3s" fill="freeze"/></text>
+    <text x="760" y="790" fill="#73daca" text-anchor="end" opacity="0">2.370 Kz<animate attributeName="opacity" from="0" to="1" begin="4.7s" dur="0.3s" fill="freeze"/></text>
+  </g>
+
+  <!-- Divider + Total -->
+  <line x1="40" y1="830" x2="860" y2="830" stroke="#414868" stroke-width="1" opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="5s" dur="0.3s" fill="freeze"/>
+  </line>
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="5.2s" dur="0.5s" fill="freeze"/>
+    <rect x="40" y="855" width="820" height="90" rx="10" fill="#1f2335" stroke="#e63946" stroke-width="2"/>
+    <text x="60" y="895" font-size="18" fill="#a9b1d6" font-family="Inter,Segoe UI,Arial,sans-serif">TOTAL — 7 dias · 2 pessoas</text>
+    <text x="840" y="900" font-size="36" fill="#e63946" text-anchor="end" font-weight="700" font-family="Inter,Segoe UI,Arial,sans-serif">29.470 Kz</text>
+    <text x="840" y="930" font-size="14" fill="#565f89" text-anchor="end" font-family="Inter,Segoe UI,Arial,sans-serif">≈ 32 USD</text>
+  </g>
+
+  <!-- footer -->
+  <text x="40" y="990" font-size="13" fill="#565f89" opacity="0">
+    github.com/rasgadocarlos2-jpg/angomart-mcp · MIT
+    <animate attributeName="opacity" from="0" to="1" begin="5.8s" dur="0.4s" fill="freeze"/>
+  </text>
+  <text x="860" y="990" font-size="13" fill="#565f89" text-anchor="end" opacity="0">
+    python + fastmcp + playwright
+    <animate attributeName="opacity" from="0" to="1" begin="5.8s" dur="0.4s" fill="freeze"/>
+  </text>
+
+  <!-- cursor pulse -->
+  <circle cx="800" cy="155" r="4" fill="#7aa2f7">
+    <animate attributeName="opacity" values="1;0.2;1" dur="1.2s" repeatCount="indefinite"/>
+  </circle>
+</svg>

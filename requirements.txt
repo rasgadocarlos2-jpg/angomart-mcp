@@ -1,6 +1,5 @@
 mcp>=1.0.0
 httpx>=0.27.0
 
-# Opcional: fallback via browser quando o AngoMart bloqueia chamadas directas
-# Instala com: pip install playwright && playwright install chromium
-playwright>=1.40.0
+# Opcional: fallback via browser quando o AngoMart bloqueia chamadas directas.
+# Instala com: pip install -e ".[browser]" && playwright install chromium

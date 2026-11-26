@@ -3,105 +3,109 @@
 [![MCP](https://img.shields.io/badge/MCP-compatible-5A67D8?logo=anthropic&logoColor=white)](https://modelcontextprotocol.io)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Angola](https://img.shields.io/badge/🇦🇴-Angola-000000)]()
 
-Servidor MCP não-oficial para o **AngoMart** (Angola). Permite que Claude, Cursor, ChatGPT ou qualquer cliente MCP consulte lojas, categorias e produtos directamente do catálogo online do AngoMart.
+Servidor MCP não-oficial para o **AngoMart** (Angola). Permite consultar lojas, categorias, produtos, preços e stock publicados no catálogo. Inclui ferramentas para estimar listas de compras e comparar preços entre lojas.
 
-![demo](docs/demo.svg)
-
-> Não-oficial. Este projeto é independente do AngoMart e da Jungleworks. Usa a API pública do site e pode deixar de funcionar se o site mudar.
-
-Inspirado no [continente-mcp](https://github.com/andredelgado/continente-mcp) do André Delgado.
+> Projecto independente do AngoMart e da Jungleworks. Depende de endpoints não documentados, que podem mudar. Não efectua compras nem garante disponibilidade no checkout.
 
 ## Ferramentas
 
 | Ferramenta | Função |
 |---|---|
-| `angomart_list_stores` | Lista lojas AngoMart ordenadas por proximidade (lat/long) |
-| `angomart_list_categories` | Árvore de categorias de uma loja |
-| `angomart_get_products_by_category` | Produtos de uma categoria |
-| `angomart_search_products` | Pesquisa produtos por nome numa loja |
+| `angomart_list_stores` | Lista lojas por coordenadas (Luanda/Talatona por omissão) |
+| `angomart_list_categories` | Lista categorias e subcategorias de uma loja |
+| `angomart_get_products_by_category` | Consulta produtos de uma categoria, com paginação limitada |
+| `angomart_search_products` | Pesquisa por nome, ignorando acentos |
+| `angomart_get_product_details` | Procura correspondências e apresenta preço, stock e SKU disponíveis |
+| `angomart_calculate_shopping_list` | Calcula uma estimativa de custo para uma lista JSON |
+| `angomart_compare_stores` | Compara resultados de um produto em várias lojas |
 
 ## Instalação
+
+Requer Python 3.10+.
 
 ```bash
 git clone https://github.com/rasgadocarlos2-jpg/angomart-mcp.git
 cd angomart-mcp
-python -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e .
 ```
 
-## Configuração no Claude Desktop
+O Playwright é opcional. Para activar o fallback quando a API responde com `status: 100`:
 
-Edita `claude_desktop_config.json`:
+```bash
+pip install -e ".[browser]"
+playwright install chromium
+```
+
+Também podes definir:
+- `ANGOMART_COOKIE`: cookie de sessão do site, se necessário.
+- `ANGOMART_CACHE_TTL`: cache em segundos (predefinição: 180).
+- `ANGOMART_MAX_PAGES`: máximo de páginas percorridas por categoria na pesquisa (predefinição: 5).
+- `ANGOMART_TIMEOUT`: timeout HTTP em segundos (predefinição: 25).
+
+## Configuração num cliente MCP
+
+Exemplo de configuração local:
 
 ```json
 {
   "mcpServers": {
     "angomart": {
       "command": "python",
-      "args": ["/caminho/completo/para/server.py"]
+      "args": ["/caminho/completo/para/angomart-mcp/server.py"]
     }
   }
 }
 ```
 
-Reinicia o Claude Desktop. Testa com:
-
-> Lista as lojas AngoMart mais próximas. Depois procura "arroz" na loja de Talatona.
+Reinicia o cliente MCP depois de guardar a configuração.
 
 ## Exemplos
 
-```
-> angomart_list_stores
-- AngoMart Talatona (store_id: 1736945)
-- AngoMart Vila Alice (store_id: ...)
-- AngoMart Nova Vida (store_id: ...)
+Pesquisa de produtos:
 
-> angomart_list_categories(store_id=1736945)
-- FRUTAS & LEGUMES (11908658)
-- CARNES & CONGELADOS (11903313)
-  - CARNES & CONGELADOS (11903334)
-  - GELO (11903335)
-- CEREAIS, MASSAS E GRÃOS (11903315)
-  - ARROZ (11903343)
-  - MASSAS & NOODLES (11903342)
-...
-
-> angomart_get_products_by_category(store_id=1736945, catalogue_id=11908658)
-- ANANAS KG — 690 Kz — stock: 137
-- TOMATE CHUCHA 1.K.G — 2.490 Kz — stock: 30
-- MELANCIA KG — 790 Kz — stock: 328
-...
+```text
+angomart_search_products(store_id=1736945, query="arroz")
 ```
 
-## Como funciona
+Estimativa de lista de compras (quantidade multiplica o preço da embalagem/unidade apresentada):
 
-O AngoMart está construído sobre a plataforma **Yelo (Jungleworks)** e expõe uma API JSON pública para browsing. Este MCP faz chamadas directas a:
+```text
+angomart_calculate_shopping_list(
+  store_id=1736945,
+  items_json='[{"name":"arroz","quantity":2},{"name":"feijão","quantity":1}]'
+)
+```
 
-- `GET /api/marketplace/marketplace_get_city_storefronts_v3` — lojas por cidade
-- `POST /api/catalogue/get` — árvore de categorias
-- `POST /api/get_products_for_category` — produtos por categoria
+Comparação entre lojas:
 
-Sem Playwright, sem scraping HTML. Só JSON.
+```text
+angomart_compare_stores(store_ids="1736945,1736946", query="leite")
+```
 
-## Limitações
+## Como funciona e limitações
 
-- Não faz login, não adiciona ao carrinho, não submete encomendas (por desenho).
-- A pesquisa por nome é client-side (itera categorias) — lenta em lojas grandes.
-- Preços e stock podem estar desatualizados em relação à loja física.
-- A listagem de lojas (`angomart_list_stores`) funciona directamente. As ferramentas de catálogo e produtos usam endpoints que o AngoMart protege contra scraping directo: podem retornar `status: 100` fora do navegador. Duas formas de contornar:
-  1. **Playwright fallback** (recomendado): `pip install playwright && playwright install chromium`. O server detecta automaticamente `status: 100` e refaz a chamada dentro de um Chromium headless.
-  2. **Cookie manual**: define `ANGOMART_COOKIE` com o header `Cookie` copiado das DevTools do browser.
+O servidor consulta endpoints JSON usados pelo site AngoMart (plataforma Yelo/Jungleworks). Esses endpoints não são uma API pública documentada nem têm contrato estável.
 
-## Roadmap
+- Os preços e o stock são os valores devolvidos pelo catálogo no momento da consulta; podem mudar e não equivalem a confirmação de checkout.
+- A pesquisa percorre categorias/subcategorias e páginas até ao limite configurado; pode ser lenta ou não encontrar produtos para além desse limite.
+- O cálculo da lista multiplica a quantidade pelo preço da embalagem/unidade listada. **Não converte kg, litros ou tamanhos de embalagem**; confirma sempre a unidade e a variante.
+- A comparação só é válida quando marca, peso, volume e variante correspondem.
+- Não faz login, não adiciona artigos ao carrinho e não submete encomendas.
+- O fallback Playwright só é tentado quando o endpoint devolve `status: 100`. A estrutura da API pode mudar e bloquear a integração.
 
-- [x] Fallback Playwright para endpoints protegidos (como o continente-mcp faz)
-- [ ] Suporte a outras cidades / coordenadas por configuração
-- [ ] Adaptador `kibabo-mcp` (loja Kibabo em Angola, stack Redicom Prolepse)
-- [ ] Adaptador `tupuca-mcp` (super-app de delivery angolana, mesma stack Yelo)
+## Desenvolvimento
+
+```bash
+pip install -e ".[dev]"
+pytest
+ruff check .
+```
+
+Ainda não há testes de integração contra o AngoMart: esses testes devem ser executados com cuidado e sem automatizar compras.
 
 ## Licença
 
-MIT. Vê [LICENSE](LICENSE).
+MIT. Consulta [LICENSE](LICENSE).
