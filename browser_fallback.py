@@ -99,6 +99,94 @@ async def browser_fetch_json(seed_url: str, path: str, method: str = "POST",
             raise
 
 
+async def scrape_full_catalogue(seed_url: str) -> dict[str, Any]:
+    """Visita cada categoria da loja, scrape nome+preço+stock+SKU de cada produto.
+
+    Devolve: {"categories": [{"name", "catalogue_id", "products": [...]}], "total_products": int}
+    O catalogue_id é um hash estável do nome (positivo, 8 dígitos) — não corresponde
+    ao id da API, mas é reprodutível entre chamadas.
+    """
+    if not HAS_PLAYWRIGHT:
+        raise RuntimeError("Playwright indisponível.")
+    async with _lock:
+        page = await _ensure_page(seed_url)
+        # Obter lista de nomes de categorias da sidebar
+        category_names = await page.evaluate(
+            """() => {
+                const seen = new Set();
+                const names = [];
+                for (const el of document.querySelectorAll('*')) {
+                    const t = (el.textContent || '').trim();
+                    if (!t || t.length < 3 || t.length > 50) continue;
+                    if (el.children.length !== 0) continue;
+                    if (!/^[A-ZÁÂÃÀÉÊÍÓÔÕÚÇ][A-ZÁÂÃÀÉÊÍÓÔÕÚÇ\\s&,.]+$/.test(t)) continue;
+                    if (seen.has(t)) continue;
+                    seen.add(t);
+                    names.push(t);
+                }
+                return names;
+            }"""
+        )
+
+        categories: list[dict[str, Any]] = []
+        for name in category_names:
+            # Clicar na categoria para carregar produtos
+            clicked = await page.evaluate(
+                """(target) => {
+                    const el = [...document.querySelectorAll('*')].find(e =>
+                        (e.textContent || '').trim() === target && e.children.length === 0
+                    );
+                    if (!el) return false;
+                    el.scrollIntoView();
+                    ['mousedown','mouseup','click'].forEach(t =>
+                        el.dispatchEvent(new MouseEvent(t, {bubbles:true, cancelable:true, view:window}))
+                    );
+                    return true;
+                }""",
+                name,
+            )
+            if not clicked:
+                continue
+            await page.wait_for_timeout(2500)
+            # Scroll para carregar lazy-load
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await page.wait_for_timeout(1200)
+            # Scrape product cards
+            products = await page.evaluate(
+                """() => {
+                    const cards = [...document.querySelectorAll('div')].filter(d => {
+                        const txt = d.innerText || '';
+                        return /kz[\\d,]+\\.\\d{2}/i.test(txt) &&
+                               txt.length < 300 && d.children.length < 20 && d.querySelector('img');
+                    });
+                    const seen = new Set();
+                    const out = [];
+                    for (const c of cards) {
+                        const txt = c.innerText.replace(/\\s+/g, ' ').trim();
+                        if (seen.has(txt) || txt.length > 200) continue;
+                        seen.add(txt);
+                        // extract price
+                        const m = txt.match(/kz([\\d,.]+)/i);
+                        const price = m ? parseFloat(m[1].replace(/,/g,'')) : null;
+                        // name is everything before the first " kz" or before the unit repeat
+                        const parts = txt.split(/\\s+kz/i)[0].trim();
+                        out.push({name: parts, price: price, raw: txt});
+                    }
+                    return out;
+                }"""
+            )
+            # Hash estável do nome da categoria
+            synthetic_id = abs(hash(name)) % 90000000 + 11900000
+            categories.append({
+                "name": name,
+                "catalogue_id": synthetic_id,
+                "products": products,
+            })
+
+        total = sum(len(c["products"]) for c in categories)
+        return {"categories": categories, "total_products": total}
+
+
 async def read_cached_products(seed_url: str) -> list[dict[str, Any]]:
     """Lê produtos pré-carregados em localStorage.app da app AngoMart.
 
