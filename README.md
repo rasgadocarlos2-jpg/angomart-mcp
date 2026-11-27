@@ -3,6 +3,7 @@
 [![MCP](https://img.shields.io/badge/MCP-compatible-5A67D8?logo=anthropic&logoColor=white)](https://modelcontextprotocol.io)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![angomart-mcp MCP server](https://glama.ai/mcp/servers/rasgadocarlos2-jpg/angomart-mcp/badges/score.svg)](https://glama.ai/mcp/servers/rasgadocarlos2-jpg/angomart-mcp)
 
 Servidor MCP não-oficial para o **AngoMart** (Angola). Permite consultar lojas, categorias, produtos, preços e stock publicados no catálogo. Inclui ferramentas para estimar listas de compras e comparar preços entre lojas.
 
